@@ -36,11 +36,20 @@ from pathlib import Path
 # ---------------------------
 PROJECT_DIR = Path(__file__).resolve().parent
 ALLOWED_BRANDS = ["UDILIV", "COLOSPA", "FLORACHAMP", "EZYBIXY"]
-DEFAULT_INPUT = PROJECT_DIR / "DCR_RAW_STANDARDIZED_4div_2026-03-01_2026-03-31_Div30.xlsx"
+DEFAULT_INPUT = PROJECT_DIR / "DCR_RAW_STANDARDIZED_4div_2025-11-01_2026-02-28_Div30.csv"
 DEFAULT_OUTPUT = PROJECT_DIR / "out_jan_div30.csv"
 DEFAULT_REPORT_MONTH = "2026-02"
 DEFAULT_TEMPLATE = PROJECT_DIR / "Copy of Data Dump.csv"
 DEFAULT_HIERARCHY = PROJECT_DIR / "hierarchy.csv"
+
+# ---------------------------
+# USER CONFIG (edit these, then just run the script)
+# ---------------------------
+USER_INPUT = str(DEFAULT_INPUT)          # CSV or XLSX raw DCR path
+USER_OUTPUT = str(DEFAULT_OUTPUT)        # output SlotMAX CSV path
+USER_REPORT_MONTH = str(DEFAULT_REPORT_MONTH)  # "latest" or "YYYY-MM"
+USER_DAYFIRST = False                   # True if dates are DD/MM/YYYY
+USER_AUDIT_OUTPUT = None                # optional audit CSV path (or None)
 
 # Map input CSV column names to template column names (so output has correct headers and data)
 INPUT_TO_TEMPLATE_COLUMN_MAP = {
@@ -800,6 +809,68 @@ def load_input_df(
     return df, cols
 
 
+def write_slotmax_audit_picks(
+    df: pd.DataFrame,
+    slots: List[int],
+    doctor_col: str,
+    monthperiod_col: str,
+    date_col: str,
+    filed_date_col: str,
+    audit_csv: str,
+    encoding: str = "utf-8",
+) -> None:
+    """
+    Write an audit CSV showing which raw record was picked per (Doctor, Month, Slot).
+
+    This is the lowest-level "SlotMAX pick": for each slot i (Brand{i}, Rx/Month{i}),
+    within each (Doctor, MonthPeriod) group, pick the row with maximum Rx/Month{i}
+    (tie-break by Date desc, then Filed Date desc if present). Export the picked row's
+    Date/Filed Date, brand, and rx for traceability.
+    """
+    if not audit_csv:
+        return
+
+    group_cols = [doctor_col, monthperiod_col]
+    tie_cols = [date_col] + ([filed_date_col] if filed_date_col in df.columns else [])
+    pick_parts = []
+
+    for i in slots:
+        bcol = f"Brand{i}"
+        rcol = f"Rx/Month{i}"
+        if bcol not in df.columns or rcol not in df.columns:
+            continue
+        cols_needed = group_cols + tie_cols + [bcol, rcol]
+        tmp = df[cols_needed].copy()
+        tmp["_slot"] = i
+        tmp["_brand_raw"] = tmp[bcol]
+        tmp["_rx_raw"] = pd.to_numeric(tmp[rcol], errors="coerce")
+
+        sort_by = group_cols + ["_rx_raw"] + tie_cols
+        ascending = [True, True] + [False] + [False] * len(tie_cols)
+        tmp = tmp.sort_values(sort_by, ascending=ascending, kind="mergesort", na_position="last")
+        best = tmp.drop_duplicates(subset=group_cols, keep="first").copy()
+
+        best = best.rename(columns={date_col: "Picked Date"})
+        if filed_date_col in best.columns:
+            best = best.rename(columns={filed_date_col: "Picked Filed Date"})
+        best["Picked Brand"] = norm_brand(best["_brand_raw"])
+        best["Picked Rx"] = best["_rx_raw"]
+
+        keep_cols = group_cols + ["_slot", "Picked Date"]
+        if "Picked Filed Date" in best.columns:
+            keep_cols.append("Picked Filed Date")
+        keep_cols += ["Picked Brand", "Picked Rx"]
+        pick_parts.append(best[keep_cols])
+
+    out = pd.concat(pick_parts, ignore_index=True) if pick_parts else pd.DataFrame(
+        columns=group_cols + ["_slot", "Picked Date", "Picked Filed Date", "Picked Brand", "Picked Rx"]
+    )
+    out = out.rename(columns={doctor_col: "Account: Customer Code", monthperiod_col: "MonthPeriod"})
+    out["MonthPeriod"] = out["MonthPeriod"].astype(str)
+    out = out.rename(columns={"_slot": "Slot"})
+    out.to_csv(audit_csv, index=False, encoding=encoding)
+
+
 def build_output_in_template_format(
     input_csv: str,
     template_csv: str,
@@ -813,6 +884,7 @@ def build_output_in_template_format(
     report_month: Optional[str] = None,
     hierarchy_csv: Optional[str] = None,
     dayfirst: bool = False,
+    audit_output_csv: Optional[str] = None,
 ) -> None:
     # Read template schema; build division-specific output header (this division's ALLOWED_BRANDS between MONTH and Variance >25%)
     template_fields = read_template_header(template_csv, encoding=encoding)
@@ -879,6 +951,7 @@ def build_output_in_template_format(
 
     # Drop bad keys
     df = df.dropna(subset=[doctor_col, "_MonthPeriod"])
+    df_all_months = df.copy()
 
     # Determine report month and baseline (three months before report)
     rm_key = (report_month or "").strip().lower()
@@ -912,6 +985,19 @@ def build_output_in_template_format(
         f"SlotMAX Div30: Date column -> report month={report_jan} | baseline months={baseline_months}",
         flush=True,
     )
+
+    # Optional: audit picks across ALL months (before 4-month filter), so we can trace picks for every month.
+    if audit_output_csv:
+        write_slotmax_audit_picks(
+            df=df_all_months,
+            slots=slots,
+            doctor_col=doctor_col,
+            monthperiod_col="_MonthPeriod",
+            date_col=date_col,
+            filed_date_col=filed_date_col,
+            audit_csv=audit_output_csv,
+            encoding=encoding,
+        )
 
     # ---------------------------
     # SlotMAX extraction -> long table (Doctor, MonthPeriod, Brand, Rx)
@@ -1105,9 +1191,9 @@ def build_output_in_template_format(
 
 def parse_args():
     p = argparse.ArgumentParser(description="SlotMAX Division 30 -> out_jan_div30.csv")
-    p.add_argument("--input", default=str(DEFAULT_INPUT), help="Input raw DCR (CSV or XLSX)")
+    p.add_argument("--input", default=str(USER_INPUT), help="Input raw DCR (CSV or XLSX)")
     p.add_argument("--template", default=str(DEFAULT_TEMPLATE), help="Template CSV path")
-    p.add_argument("--output", default=str(DEFAULT_OUTPUT), help="Output CSV path")
+    p.add_argument("--output", default=str(USER_OUTPUT), help="Output CSV path")
     p.add_argument("--doctor-col", default="Account: Customer Code", help="Doctor identifier column")
     p.add_argument("--date-col", default="Date", help="Date column")
     p.add_argument("--filed-date-col", default="Filed Date", help="Filed Date column (optional)")
@@ -1116,13 +1202,18 @@ def parse_args():
     p.add_argument("--low-memory", action="store_true", help="Enable pandas low_memory mode")
     p.add_argument(
         "--report-month",
-        default=str(DEFAULT_REPORT_MONTH),
+        default=str(USER_REPORT_MONTH),
         help="Report month (e.g. 2026-03), or 'latest' to use max month from Date. Baseline = 3 prior months.",
     )
     p.add_argument(
         "--dayfirst",
         action="store_true",
         help="Parse dates as DD/MM/YYYY (common in India). Default is MDY.",
+    )
+    p.add_argument(
+        "--audit-output",
+        default=USER_AUDIT_OUTPUT,
+        help="Optional: write an audit CSV of SlotMAX picks per (Doctor, Month, Slot) across all months in input.",
     )
     p.add_argument("--hierarchy", default=str(DEFAULT_HIERARCHY) if DEFAULT_HIERARCHY.exists() else None, help="Hierarchy CSV path")
     return p.parse_args()
@@ -1142,7 +1233,8 @@ def main():
         chunksize=args.chunksize,
         report_month=args.report_month,
         hierarchy_csv=args.hierarchy,
-        dayfirst=args.dayfirst,
+        dayfirst=(USER_DAYFIRST or args.dayfirst),
+        audit_output_csv=args.audit_output,
     )
     print(f"Done: {args.output}")
 
