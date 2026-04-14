@@ -1,0 +1,10 @@
+We have received the following feedback from the field regarding few errors in the recent SPARK data:
+1.	Records of few TBMs are not reflecting. Eg: Mateen Mirza, Pranjit Aich
+2.	Data reflecting is different from value entered in DCR. Eg: Dr. Swapnil Pendharkar-  entered 80 & 90, reflecting 75
+3.	Doctor names not reflecting in data. Eg: Dr. Manish Jain
+4.	TBM who have left the team are still reflecting
+
+Request you to please check & help.
+
+Additionally, the ‘Month’ column in data mentions ‘JAN’ while Umesh has confirmed that is an error and the data is actually for March month.
+Please rectify this as well because it will create a confusion when the data is referred to at a later stage.
