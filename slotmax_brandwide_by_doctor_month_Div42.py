@@ -36,11 +36,19 @@ from pathlib import Path
 # ---------------------------
 PROJECT_DIR = Path(__file__).resolve().parent
 ALLOWED_BRANDS = ["GANATON", "GANATON TOTAL", "DUPHALAC", "ELDICET"]
-DEFAULT_INPUT = PROJECT_DIR / "DCR_RAW_STANDARDIZED_4div_2026-03-01_2026-03-31_Div42.xlsx"
+DEFAULT_INPUT = PROJECT_DIR / "DCR_RAW_STANDARDIZED_4div_2025-11-01_2026-02-28_Div42.csv"
 DEFAULT_OUTPUT = PROJECT_DIR / "out_jan_div42.csv"
 DEFAULT_REPORT_MONTH = "2026-02"
 DEFAULT_TEMPLATE = PROJECT_DIR / "Copy of Data Dump.csv"
 DEFAULT_HIERARCHY = PROJECT_DIR / "hierarchy.csv"
+
+# ---------------------------
+# USER CONFIG (edit these, then just run the script)
+# ---------------------------
+USER_INPUT = str(DEFAULT_INPUT)          # CSV or XLSX raw DCR path
+USER_OUTPUT = str(DEFAULT_OUTPUT)        # output SlotMAX CSV path
+USER_REPORT_MONTH = str(DEFAULT_REPORT_MONTH)  # "latest" or "YYYY-MM"
+USER_DAYFIRST = False                   # True if dates are DD/MM/YYYY
 
 # Map input CSV column names to template column names (so output has correct headers and data)
 INPUT_TO_TEMPLATE_COLUMN_MAP = {
@@ -1062,9 +1070,9 @@ def build_output_in_template_format(
 
 def parse_args():
     p = argparse.ArgumentParser(description="SlotMAX Division 42 -> out_jan_div42.csv")
-    p.add_argument("--input", default=str(DEFAULT_INPUT), help="Input raw DCR (CSV or XLSX)")
+    p.add_argument("--input", default=str(USER_INPUT), help="Input raw DCR (CSV or XLSX)")
     p.add_argument("--template", default=str(DEFAULT_TEMPLATE), help="Template CSV path")
-    p.add_argument("--output", default=str(DEFAULT_OUTPUT), help="Output CSV path")
+    p.add_argument("--output", default=str(USER_OUTPUT), help="Output CSV path")
     p.add_argument("--doctor-col", default="Account: Customer Code", help="Doctor identifier column")
     p.add_argument("--date-col", default="Date", help="Date column")
     p.add_argument("--filed-date-col", default="Filed Date", help="Filed Date column (optional)")
@@ -1073,7 +1081,7 @@ def parse_args():
     p.add_argument("--low-memory", action="store_true", help="Enable pandas low_memory mode")
     p.add_argument(
         "--report-month",
-        default=str(DEFAULT_REPORT_MONTH),
+        default=str(USER_REPORT_MONTH),
         help="Report month (e.g. 2026-03), or 'latest' to use max month from Date. Baseline = 3 prior months.",
     )
     p.add_argument(
@@ -1099,7 +1107,7 @@ def main():
         chunksize=args.chunksize,
         report_month=args.report_month,
         hierarchy_csv=args.hierarchy,
-        dayfirst=args.dayfirst,
+        dayfirst=(USER_DAYFIRST or args.dayfirst),
     )
     print(f"Done: {args.output}")
 
