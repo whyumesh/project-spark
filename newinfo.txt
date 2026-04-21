@@ -1,0 +1,3 @@
+Need seperate output sheets for every month for each BU (you can put in 3 sheets)
+Addition of "New Mapping" column - I have shared the mapping over email
+Correction in logic for "new prescriber" - it is when in current month the sum of prescriptions is >0 while in previous 2 or 3 months it is =0
